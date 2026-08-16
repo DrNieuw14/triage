@@ -1,0 +1,227 @@
+name: Build macOS App
+
+# Builds a real, native TriageApp.app on GitHub's macOS runners — this is
+# genuine Mac hardware, not a cross-compile from Windows/Linux (PyInstaller
+# and the static PHP builder both need to run on the OS they're targeting).
+#
+# Two architectures are built separately since Macs shipped in the last
+# ~5 years split between Intel (x86_64) and Apple Silicon (arm64), and
+# there's no single binary that runs natively on both without a slower
+# Rosetta translation layer.
+#
+# NOTE: the macos-13 (Intel) runner label may be retired by GitHub after
+# this workflow was written — GitHub periodically drops older macOS runner
+# images. If that job fails with a "runner label not found"-type error
+# rather than an actual build error, check the current list at
+# https://github.com/actions/runner-images and swap in whatever Intel
+# label (if any) is still offered; Apple Silicon (macos-14) is the safer
+# long-term bet since that's Apple's current hardware direction.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'launcher/**'
+      - 'ml/**'
+      - 'laravel-app/**'
+      - '.github/workflows/build-macos.yml'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            spc_url: https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-macos-aarch64
+          - os: macos-13
+            arch: x86_64
+            spc_url: https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-macos-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build-time PHP (for composer install / artisan) — separate from the
+      # static PHP binary we bundle for the shipped app's own runtime.
+      - name: Set up build-time PHP + Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      - name: Install PHP dependencies
+        working-directory: laravel-app
+        run: composer install --no-dev --optimize-autoloader --no-interaction
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # laravel-app/.env is gitignored (never pushed) and .env.example is
+      # the generic Laravel default — missing this app's own TRIAGE_API_URL
+      # / TRAIN_SHARED_SECRET / TRAIN_PAGE_PASSWORD keys entirely, and
+      # SESSION_DRIVER=database instead of the `file` driver this packaged,
+      # DB-less build needs. Writing the real values directly here instead
+      # of patching .env.example, since .env.example is meant to stay the
+      # generic "here's what a dev sets up locally" template.
+      #
+      # TRAIN_SHARED_SECRET's value must byte-for-byte match ml/api.py's
+      # hardcoded fallback default — the two processes don't share env
+      # loading, so this is intentionally duplicated, not a typo. This has
+      # to run *before* the frontend build below — Laravel's Vite plugin
+      # reads .env (any VITE_*-prefixed keys) at build time via loadEnv,
+      # not just at request time.
+      - name: Configure .env for the packaged app
+        working-directory: laravel-app
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+
+          {
+            echo "APP_NAME=\"Triage Decision Support\""
+            echo "APP_URL=http://127.0.0.1:8020"
+            echo "SESSION_DRIVER=file"
+            echo "TRIAGE_API_URL=http://127.0.0.1:5055"
+            echo "TRAIN_SHARED_SECRET=03fba325c50981107f840218ba31c8a45582db301a93dad1"
+            echo "TRAIN_PAGE_PASSWORD=triage2026"
+          } >> .env
+
+          touch database/database.sqlite
+          php artisan migrate --force
+
+      - name: Build frontend assets
+        working-directory: laravel-app
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python build dependencies
+        run: |
+          pip install -r ml/requirements.txt
+          pip install -r launcher/requirements.txt
+
+      - name: Build TriageAPI (Flask ML API)
+        working-directory: ml
+        run: pyinstaller TriageAPI.mac.spec
+
+      - name: Build TriageApp.app (launcher)
+        working-directory: launcher
+        run: pyinstaller TriageApp.mac.spec
+
+      - name: Download static PHP builder (spc)
+        run: |
+          curl -fsSL -o spc "${{ matrix.spc_url }}"
+          chmod +x ./spc
+          ./spc --version || true
+
+      - name: Build a static, self-contained PHP CLI binary
+        run: |
+          cat > craft.yml <<'EOF'
+          php-version: "8.3"
+          extensions: "pdo_sqlite,sqlite3,curl,openssl,mbstring,tokenizer,dom,fileinfo,filter,ctype,session,xml,bcmath"
+          sapi:
+            - cli
+          download-options:
+            parallel: 10
+          EOF
+          ./spc craft
+
+          echo "Searching for the built php binary..."
+          STATIC_PHP="$(find . -type f -name php -perm +111 -path '*buildroot*' | head -n1)"
+          if [ -z "$STATIC_PHP" ]; then
+            echo "::error::Could not find the static php binary spc built. Listing likely directories for debugging:"
+            find . -maxdepth 3 -iname '*buildroot*' -o -iname '*php-sapi*'
+            exit 1
+          fi
+          echo "Found static php at: $STATIC_PHP"
+          "$STATIC_PHP" --version
+          echo "STATIC_PHP_PATH=$STATIC_PHP" >> "$GITHUB_ENV"
+
+      # Everything the app needs lives inside the .app bundle's
+      # Contents/Resources/ — see launcher.py's base_dir() for why.
+      - name: Assemble TriageApp.app
+        run: |
+          set -euo pipefail
+          APP="launcher/dist/TriageApp.app"
+          RESOURCES="$APP/Contents/Resources"
+
+          mkdir -p "$RESOURCES/runtime/php"
+          cp "$STATIC_PHP_PATH" "$RESOURCES/runtime/php/php"
+          chmod +x "$RESOURCES/runtime/php/php"
+          # Minimal — the static binary has every extension compiled in
+          # (no extension_dir / .so loading needed), so this just sets a
+          # couple of sane defaults rather than fixing broken paths like
+          # the Windows build's php.ini needed to.
+          printf 'date.timezone = UTC\nshort_open_tag = Off\n' > "$RESOURCES/runtime/php/php.ini"
+
+          mkdir -p "$RESOURCES/api"
+          cp -R ml/dist/TriageAPI "$RESOURCES/api/TriageAPI"
+          # api.py resolves MODEL_PATH relative to sys.executable's own
+          # directory when frozen (so a /train retrain persists across
+          # runs instead of writing into a temp extraction dir) — it is
+          # NOT bundled via PyInstaller's `datas`, so it has to be copied
+          # here by hand, right next to the actual TriageAPI binary.
+          cp ml/triage_model.pkl "$RESOURCES/api/TriageAPI/triage_model.pkl"
+
+          cp -R laravel-app "$RESOURCES/laravel-app"
+          rm -rf "$RESOURCES/laravel-app/tests" "$RESOURCES/laravel-app/.git"
+
+      - name: Smoke-test the assembled app on real macOS
+        run: |
+          set -euo pipefail
+          APP="launcher/dist/TriageApp.app/Contents/Resources"
+
+          "$APP/api/TriageAPI/TriageAPI" &
+          API_PID=$!
+
+          (
+            cd "$APP/laravel-app"
+            "$APP/runtime/php/php" -c "$APP/runtime/php/php.ini" -S 127.0.0.1:8020 -t public &
+            echo $! > /tmp/php_pid
+          )
+          PHP_PID="$(cat /tmp/php_pid)"
+
+          cleanup() { kill "$API_PID" "$PHP_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          echo "Waiting for the ML API health check..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5055/health; then break; fi
+            [ "$i" -eq 30 ] && { echo "::error::TriageAPI never came up"; exit 1; }
+            sleep 1
+          done
+          echo
+
+          echo "Waiting for the Laravel form..."
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8020/triage; then break; fi
+            [ "$i" -eq 30 ] && { echo "::error::Laravel server never came up"; exit 1; }
+            sleep 1
+          done
+          echo "Laravel form responded OK."
+
+          echo "Sanity-checking a real /predict call through the ML API directly..."
+          curl -fsS -X POST http://127.0.0.1:5055/predict \
+            -H "Content-Type: application/json" \
+            -d '{"age":45,"sbp":120,"dbp":80,"hr":90,"rr":18,"temp":37.0,"pain_score":5}'
+          echo
+          echo "Smoke test passed: both backends started, responded, and produced a real prediction on macOS (${{ matrix.arch }})."
+
+      - name: Zip the app for download
+        run: |
+          cd launcher/dist
+          ditto -c -k --sequesterRsrc --keepParent TriageApp.app "TriageApp-macos-${{ matrix.arch }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TriageApp-macos-${{ matrix.arch }}
+          path: launcher/dist/TriageApp-macos-${{ matrix.arch }}.zip
+          retention-days: 30

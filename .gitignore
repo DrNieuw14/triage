@@ -1,0 +1,24 @@
+ml/venv/
+ml/__pycache__/
+# ktas_triage_data.csv and triage_model.pkl are intentionally committed —
+# they're the shipped prototype dataset/model, documented in README.md.
+
+laravel-app/vendor/
+laravel-app/node_modules/
+laravel-app/.env
+laravel-app/storage/*.key
+laravel-app/public/build/
+laravel-app/public/hot
+laravel-app/database/database.sqlite
+
+# Packaging build output for the standalone .exe (see launcher/launcher.py
+# and README.md's "Portable app" section) — all regenerable, not source,
+# and far too large to commit (the assembled distributable alone is ~340MB).
+ml/build/
+ml/dist/
+launcher/build/
+launcher/dist/
+launcher/__pycache__/
+runtime/
+TriageApp-Portable/
+TriageApp-Portable.zip

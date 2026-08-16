@@ -1,0 +1,22 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@theme {
+    /* Theme reference: healthnz.govt.nz — deep navy + light aqua accent,
+       Public Sans body / Poppins headings, 10px-rounded white cards. */
+    --font-sans: 'Public Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-heading: 'Poppins', ui-sans-serif, system-ui, sans-serif;
+
+    --color-navy: #0c1a3a;
+    --color-navy-light: #192849;
+    --color-navy-deep: #222a77;
+    --color-aqua: #7ee3eb;
+    --color-aqua-light: #bdfaff;
+
+    --radius-card: 10px;
+}
