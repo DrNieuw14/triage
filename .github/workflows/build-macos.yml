@@ -1,22 +1,25 @@
 name: Build macOS App
 
-# Builds a real, native TriageApp.app on GitHub's macOS runners — this is
+# Builds a real, native TriageApp.app on a GitHub macOS runner — this is
 # genuine Mac hardware, not a cross-compile from Windows/Linux (PyInstaller
 # and the static PHP builder both need to run on the OS they're targeting).
 #
-# Two architectures are built separately since Macs shipped in the last
-# ~5 years split between Intel (x86_64) and Apple Silicon (arm64), and
-# there's no single binary that runs natively on both without a slower
-# Rosetta translation layer.
+# Apple Silicon (arm64) only — covers any Mac sold since late 2020. Intel
+# (x86_64) macOS runners were tried and dropped: GitHub only offers Intel
+# Mac hardware through its paid "larger runners" tier now (even for public
+# repos), and that job failed outright with "recent account payments have
+# failed or your spending limit needs to be increased" rather than a build
+# error. Revisit only if Intel support becomes a real requirement and
+# someone's opted into that billing deliberately.
 #
-# NOTE: this already happened once — macos-13 (Intel) was silently removed
-# from GitHub's runner pool after this workflow was first written, which
-# didn't surface as an error; the x86_64 job just sat queued forever with
-# zero steps ever starting, since nothing matched that label anymore.
-# macos-15 / macos-15-large are current as of writing, but GitHub keeps
-# retiring old macOS images on this same rolling basis — if a job goes
-# queued indefinitely again, that's the tell (not a build failure), and
-# https://github.com/actions/runner-images has the current label list.
+# NOTE: macos-13 was silently removed from GitHub's runner pool at one
+# point during this workflow's life, which didn't surface as an error —
+# the job just sat queued forever with zero steps ever starting, since
+# nothing matched that label anymore. macos-15 is current as of writing,
+# but GitHub retires old macOS images on this same rolling basis — if the
+# job goes queued indefinitely again, that's the tell (not a build
+# failure), and https://github.com/actions/runner-images has the current
+# label list.
 
 on:
   workflow_dispatch:
@@ -30,29 +33,19 @@ on:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15
-            arch: arm64
-            spc_url: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-aarch64.tar.gz
-          - os: macos-15-large
-            arch: x86_64
-            spc_url: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-x86_64.tar.gz
+    runs-on: macos-15
 
-    runs-on: ${{ matrix.os }}
-
-    # The runners build on macOS 14/13, but the app needs to also launch on
-    # older Macs (as old as Monterey, 12.0). This tells every compiler
-    # invoked in this job (spc's clang build of static PHP, any pip package
-    # that needs to compile a C extension) to target that floor instead of
-    # defaulting to the runner's own OS version. It does NOT retroactively
-    # fix a binary that's already prebuilt for a newer minimum (e.g. the
-    # Python interpreter actions/setup-python installs) — that's what the
-    # "Verify bundled binaries" step below checks for.
+    # MACOSX_DEPLOYMENT_TARGET: the runner builds on macOS 15, but the app
+    # needs to also launch on older Macs (as old as Monterey, 12.0). This
+    # tells every compiler invoked in this job (spc's clang build of static
+    # PHP, any pip package that needs to compile a C extension) to target
+    # that floor instead of defaulting to the runner's own OS version. It
+    # does NOT retroactively fix a binary that's already prebuilt for a
+    # newer minimum (e.g. the Python interpreter actions/setup-python
+    # installs) — that's what the "Verify bundled binaries" step checks for.
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
+      SPC_URL: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-aarch64.tar.gz
 
     steps:
       - uses: actions/checkout@v4
@@ -134,7 +127,7 @@ jobs:
       # of this workflow) — a release asset is a .tar.gz, not a raw binary.
       - name: Download static PHP builder (spc)
         run: |
-          curl -fsSL -o spc.tar.gz "${{ matrix.spc_url }}"
+          curl -fsSL -o spc.tar.gz "$SPC_URL"
           tar -xzf spc.tar.gz
           if [ ! -f ./spc ]; then
             echo "spc not found at top level after extraction, searching archive contents..."
@@ -345,15 +338,15 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"age":45,"sbp":120,"dbp":80,"hr":90,"rr":18,"temp":37.0,"pain_score":5}'
           echo
-          echo "Smoke test passed: both backends started, responded, and produced a real prediction on macOS (${{ matrix.arch }})."
+          echo "Smoke test passed: both backends started, responded, and produced a real prediction on macOS (arm64)."
 
       - name: Zip the app for download
         run: |
           cd launcher/dist
-          ditto -c -k --sequesterRsrc --keepParent TriageApp.app "TriageApp-macos-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent TriageApp.app "TriageApp-macos-arm64.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TriageApp-macos-${{ matrix.arch }}
-          path: launcher/dist/TriageApp-macos-${{ matrix.arch }}.zip
+          name: TriageApp-macos-arm64
+          path: launcher/dist/TriageApp-macos-arm64.zip
           retention-days: 30

@@ -15,13 +15,19 @@ trigger it manually from the GitHub Actions tab ("Build macOS App" →
 ## Getting the app
 
 Open the finished workflow run on GitHub → **Artifacts** section at the
-bottom → download the zip matching the Mac it'll run on:
-
-- **`TriageApp-macos-arm64.zip`** — Apple Silicon (M1/M2/M3/M4). This is
-  what almost anyone with a Mac bought since late 2020 has.
-- **`TriageApp-macos-x86_64.zip`** — Intel Macs.
+bottom → download **`TriageApp-macos-arm64.zip`** (Apple Silicon —
+M1/M2/M3/M4, i.e. any Mac bought since late 2020).
 
 Unzip it — you get a single `TriageApp.app`.
+
+**Intel Macs (x86_64) aren't built.** That job was tried and dropped:
+GitHub only offers Intel Mac hardware through its paid "larger runners"
+tier, even for public repos, and it failed outright on billing rather
+than a build error ("recent account payments have failed or your
+spending limit needs to be increased"). If genuine Intel support is
+ever needed, that's an account billing decision to make first, then the
+old two-job matrix in git history (before the arm64-only simplification)
+is the starting point to restore.
 
 ## First launch: the Gatekeeper step
 
@@ -37,7 +43,7 @@ This is expected, not a bug. Two ways past it, once per machine:
 
 ## macOS version floor: Monterey (12.0)
 
-The build runs on GitHub's macOS 14/13 runners, but the app is meant to also
+The build runs on a GitHub macOS 15 runner, but the app is meant to also
 launch on older Macs — Monterey (12.0) specifically. A binary compiled with
 no explicit target defaults to requiring whatever OS it was *built* on, which
 would silently produce a zip that installs fine but refuses to open on an
@@ -77,8 +83,8 @@ thing to report back.
 
 ## Known limitations vs. the Windows build
 
-- **Two architecture-specific builds**, not one universal binary — pick the
-  right zip above.
+- **Apple Silicon (arm64) only** — no Intel build (see the billing note
+  under "Getting the app" above).
 - **Static PHP via `static-php-cli`** instead of a copied XAMPP PHP — this
   actually needs *less* fixing than Windows did (extensions are compiled
   directly into the binary, so there's no `extension_dir` path to get
