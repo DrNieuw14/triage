@@ -148,7 +148,18 @@ jobs:
           chmod +x ./spc
           ./spc --version
 
+      # spc craft resolves each extension's source (php-src, openssl, the
+      # `watcher` lib, etc.) via unauthenticated calls to api.github.com,
+      # which GitHub rate-limits hard (60 requests/hour per IP) — runner
+      # IPs are heavily shared, so this gets hit often and spc's own
+      # fallback path crashes on the resulting 403 instead of failing
+      # gracefully. Authenticating with GITHUB_TOKEN (provided free by
+      # Actions for every run, no secret to configure) raises that to
+      # 5,000/hour and is the fix static-php-cli's own docs recommend
+      # for CI use.
       - name: Build a static, self-contained PHP CLI binary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cat > craft.yml <<'EOF'
           php-version: "8.3"
