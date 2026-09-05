@@ -180,6 +180,21 @@ jobs:
           mkdir -p "$RESOURCES/runtime/php"
           cp "$STATIC_PHP_PATH" "$RESOURCES/runtime/php/php"
           chmod +x "$RESOURCES/runtime/php/php"
+          # GitHub's macOS runners run background AV/EDR scanning that has
+          # been observed to quarantine or silently remove freshly-built,
+          # unsigned executables moments after they're written — a prior
+          # run of this workflow saw the php binary run fine immediately
+          # after `spc craft` built it, then vanish ("No such file or
+          # directory") by the very next step after being copied here,
+          # with nothing in this workflow touching it in between. An
+          # ad-hoc signature (no paid Developer account needed — `-s -`
+          # just marks it as signed, not by anyone in particular) is the
+          # standard mitigation, and is required outright to execute at
+          # all on Apple Silicon regardless of the AV question.
+          xattr -cr "$RESOURCES/runtime/php/php" || true
+          codesign --force -s - "$RESOURCES/runtime/php/php"
+          echo "Verifying the bundled php binary runs immediately after signing:"
+          "$RESOURCES/runtime/php/php" --version
           # Minimal — the static binary has every extension compiled in
           # (no extension_dir / .so loading needed), so this just sets a
           # couple of sane defaults rather than fixing broken paths like
@@ -188,6 +203,9 @@ jobs:
 
           mkdir -p "$RESOURCES/api"
           cp -R ml/dist/TriageAPI "$RESOURCES/api/TriageAPI"
+          xattr -cr "$RESOURCES/api/TriageAPI" || true
+          find "$RESOURCES/api/TriageAPI" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 \
+            | xargs -0 -I{} codesign --force -s - "{}"
           # api.py resolves MODEL_PATH relative to sys.executable's own
           # directory when frozen (so a /train retrain persists across
           # runs instead of writing into a temp extraction dir) — it is
@@ -197,6 +215,13 @@ jobs:
 
           cp -R laravel-app "$RESOURCES/laravel-app"
           rm -rf "$RESOURCES/laravel-app/tests" "$RESOURCES/laravel-app/.git"
+
+          # Ad-hoc sign the whole bundle last, on top of the individual
+          # binaries already signed above — this covers TriageApp's own
+          # launcher executable and its embedded Python.framework, which
+          # PyInstaller produced but never signed either.
+          xattr -cr "$APP" || true
+          codesign --force --deep -s - "$APP"
 
       # Nothing above guarantees the interpreter/binaries actions/setup-python
       # and pip installed were themselves built for macOS 12 — only that
@@ -259,6 +284,10 @@ jobs:
         run: |
           set -euo pipefail
           APP="launcher/dist/TriageApp.app/Contents/Resources"
+
+          echo "Sanity-checking both binaries are still present and runnable right before use:"
+          ls -la "$APP/runtime/php/php" "$APP/api/TriageAPI/TriageAPI"
+          "$APP/runtime/php/php" --version
 
           "$APP/api/TriageAPI/TriageAPI" &
           API_PID=$!
