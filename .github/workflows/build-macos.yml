@@ -140,8 +140,6 @@ jobs:
           extensions: "pdo_sqlite,sqlite3,curl,openssl,mbstring,tokenizer,dom,fileinfo,filter,ctype,session,xml,bcmath"
           sapi:
             - cli
-          download-options:
-            parallel: 10
           EOF
           ./spc craft
 
