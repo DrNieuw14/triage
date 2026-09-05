@@ -42,6 +42,17 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    # The runners build on macOS 14/13, but the app needs to also launch on
+    # older Macs (as old as Monterey, 12.0). This tells every compiler
+    # invoked in this job (spc's clang build of static PHP, any pip package
+    # that needs to compile a C extension) to target that floor instead of
+    # defaulting to the runner's own OS version. It does NOT retroactively
+    # fix a binary that's already prebuilt for a newer minimum (e.g. the
+    # Python interpreter actions/setup-python installs) — that's what the
+    # "Verify bundled binaries" step below checks for.
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -173,6 +184,63 @@ jobs:
 
           cp -R laravel-app "$RESOURCES/laravel-app"
           rm -rf "$RESOURCES/laravel-app/tests" "$RESOURCES/laravel-app/.git"
+
+      # Nothing above guarantees the interpreter/binaries actions/setup-python
+      # and pip installed were themselves built for macOS 12 — only that
+      # anything WE compile in this job (spc's static PHP) targets it. This
+      # reads each bundled Mach-O's embedded minimum-OS load command
+      # (LC_BUILD_VERSION / the older LC_VERSION_MIN_MACOSX) via `otool -l`
+      # and fails the job if anything requires newer than 12.0, so a build
+      # that can't actually launch on Monterey never reaches the artifacts
+      # list looking like a working one.
+      - name: Verify bundled binaries can launch on macOS 12 (Monterey)
+        run: |
+          set -uo pipefail
+          TARGET_MAJOR=12
+          TARGET_MINOR=0
+          FAILED=0
+
+          check_minos() {
+            local bin="$1"
+            [ -f "$bin" ] || return 0
+            local ver
+            ver="$(otool -l "$bin" 2>/dev/null | awk '
+              /LC_VERSION_MIN_MACOSX/ { getline; getline; print $2; exit }
+              /LC_BUILD_VERSION/ { getline; getline; print $2; exit }
+            ')"
+            if [ -z "$ver" ]; then
+              echo "  (?) $bin -> no minimum-OS load command found (skipping)"
+              return 0
+            fi
+            local vmajor="${ver%%.*}"
+            local rest="${ver#*.}"
+            local vminor="${rest%%.*}"
+            echo "  $bin -> requires macOS $ver"
+            if [ "$vmajor" -gt "$TARGET_MAJOR" ] || { [ "$vmajor" -eq "$TARGET_MAJOR" ] && [ "$vminor" -gt "$TARGET_MINOR" ]; }; then
+              echo "::error::$bin requires macOS $ver or later — it will refuse to launch on Monterey (12.0)."
+              FAILED=1
+            fi
+          }
+
+          echo "Checking the static PHP CLI binary..."
+          check_minos "$STATIC_PHP_PATH"
+
+          echo "Checking TriageAPI (Flask ML backend)..."
+          check_minos "launcher/dist/TriageApp.app/Contents/Resources/api/TriageAPI/TriageAPI"
+
+          echo "Checking TriageApp launcher..."
+          check_minos "launcher/dist/TriageApp.app/Contents/MacOS/TriageApp"
+
+          echo "Checking the bundled Python runtime..."
+          while IFS= read -r -d '' f; do
+            check_minos "$f"
+          done < <(find "launcher/dist/TriageApp.app" -type f \( -name "Python" -o -name "*.dylib" -o -iname "python3.*" \) -print0)
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::One or more bundled binaries were built for a newer macOS than Monterey (12.0). This zip would not launch on the target machine — see MACOS_BUILD.md."
+            exit 1
+          fi
+          echo "All checked binaries are compatible with macOS 12.0 (Monterey) or later."
 
       - name: Smoke-test the assembled app on real macOS
         run: |

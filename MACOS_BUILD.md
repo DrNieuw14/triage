@@ -35,6 +35,31 @@ This is expected, not a bug. Two ways past it, once per machine:
   from then on.
 - Or, in Terminal: `xattr -cr /path/to/TriageApp.app` before opening it.
 
+## macOS version floor: Monterey (12.0)
+
+The build runs on GitHub's macOS 14/13 runners, but the app is meant to also
+launch on older Macs — Monterey (12.0) specifically. A binary compiled with
+no explicit target defaults to requiring whatever OS it was *built* on, which
+would silently produce a zip that installs fine but refuses to open on an
+older Mac ("this app is not compatible with this version of macOS").
+
+Two things in the workflow guard against that:
+
+- `MACOSX_DEPLOYMENT_TARGET: "12.0"` is set for the whole job, so anything
+  actually compiled in CI (static PHP via `spc craft`, any C extension pip
+  needs to build) targets 12.0 instead of the runner's own OS.
+- A **"Verify bundled binaries can launch on macOS 12 (Monterey)"** step runs
+  after assembly and before the zip is produced. It reads each bundled
+  Mach-O's embedded minimum-OS version (via `otool -l`) — the static PHP
+  binary, the two PyInstaller executables, and the bundled Python runtime —
+  and **fails the build** if anything requires newer than 12.0, rather than
+  shipping an artifact that looks done but won't open on the target machine.
+
+If a build ever fails at that step, the log names exactly which binary is
+too new — that's the one to chase (most likely candidate: the Python build
+`actions/setup-python` installs, since that's the one binary in this
+pipeline this workflow doesn't compile itself).
+
 ## What's actually verified vs. not
 
 The workflow's last real step before packaging **starts both backends for
