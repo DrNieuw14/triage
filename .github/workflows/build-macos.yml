@@ -9,13 +9,14 @@ name: Build macOS App
 # there's no single binary that runs natively on both without a slower
 # Rosetta translation layer.
 #
-# NOTE: the macos-13 (Intel) runner label may be retired by GitHub after
-# this workflow was written — GitHub periodically drops older macOS runner
-# images. If that job fails with a "runner label not found"-type error
-# rather than an actual build error, check the current list at
-# https://github.com/actions/runner-images and swap in whatever Intel
-# label (if any) is still offered; Apple Silicon (macos-14) is the safer
-# long-term bet since that's Apple's current hardware direction.
+# NOTE: this already happened once — macos-13 (Intel) was silently removed
+# from GitHub's runner pool after this workflow was first written, which
+# didn't surface as an error; the x86_64 job just sat queued forever with
+# zero steps ever starting, since nothing matched that label anymore.
+# macos-15 / macos-15-large are current as of writing, but GitHub keeps
+# retiring old macOS images on this same rolling basis — if a job goes
+# queued indefinitely again, that's the tell (not a build failure), and
+# https://github.com/actions/runner-images has the current label list.
 
 on:
   workflow_dispatch:
@@ -33,10 +34,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             arch: arm64
             spc_url: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-aarch64.tar.gz
-          - os: macos-13
+          - os: macos-15-large
             arch: x86_64
             spc_url: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-x86_64.tar.gz
 
