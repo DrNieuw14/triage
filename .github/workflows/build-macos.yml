@@ -163,7 +163,12 @@ jobs:
         run: |
           cat > craft.yml <<'EOF'
           php-version: "8.3"
-          extensions: "pdo_sqlite,sqlite3,curl,openssl,mbstring,tokenizer,dom,fileinfo,filter,ctype,session,xml,bcmath"
+          # mbregex (needs the onig lib) is a separate extension from plain
+          # mbstring in spc's catalog — without it, mb_split()/mb_ereg*()
+          # are undefined, and Laravel's Str::studly() (called constantly
+          # during routing/class resolution) calls mb_split() directly, so
+          # every request 500'd until this was added.
+          extensions: "pdo_sqlite,sqlite3,curl,openssl,mbstring,mbregex,tokenizer,dom,fileinfo,filter,ctype,session,xml,bcmath"
           sapi:
             - cli
           EOF
