@@ -294,7 +294,12 @@ jobs:
       - name: Smoke-test the assembled app on real macOS
         run: |
           set -euo pipefail
-          APP="launcher/dist/TriageApp.app/Contents/Resources"
+          # Must be absolute: the subshell below `cd`s into laravel-app
+          # before referencing $APP again, and a relative path silently
+          # resolves against that new directory instead of this one —
+          # this was the actual cause of every prior "No such file or
+          # directory" failure here, not the binaries themselves.
+          APP="$(pwd)/launcher/dist/TriageApp.app/Contents/Resources"
 
           echo "Sanity-checking both binaries are still present and runnable right before use:"
           ls -la "$APP/runtime/php/php" "$APP/api/TriageAPI/TriageAPI"
