@@ -35,10 +35,10 @@ jobs:
         include:
           - os: macos-14
             arch: arm64
-            spc_url: https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-macos-aarch64
+            spc_url: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-aarch64.tar.gz
           - os: macos-13
             arch: x86_64
-            spc_url: https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-macos-x86_64
+            spc_url: https://github.com/crazywhalecc/static-php-cli/releases/download/2.8.5/spc-macos-x86_64.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -127,11 +127,26 @@ jobs:
         working-directory: launcher
         run: pyinstaller TriageApp.mac.spec
 
+      # Pinned to a tagged static-php-cli release (not the "nightly" channel,
+      # which is a continuously-rebuilt bleeding-edge binary that broke
+      # craft.yml parsing and then its own downloader in back-to-back runs
+      # of this workflow) — a release asset is a .tar.gz, not a raw binary.
       - name: Download static PHP builder (spc)
         run: |
-          curl -fsSL -o spc "${{ matrix.spc_url }}"
+          curl -fsSL -o spc.tar.gz "${{ matrix.spc_url }}"
+          tar -xzf spc.tar.gz
+          if [ ! -f ./spc ]; then
+            echo "spc not found at top level after extraction, searching archive contents..."
+            find . -maxdepth 2 -type f -name spc
+            SPC_BIN="$(find . -maxdepth 2 -type f -name spc | head -n1)"
+            if [ -z "$SPC_BIN" ]; then
+              echo "::error::Could not locate the spc binary inside the downloaded release archive."
+              exit 1
+            fi
+            cp "$SPC_BIN" ./spc
+          fi
           chmod +x ./spc
-          ./spc --version || true
+          ./spc --version
 
       - name: Build a static, self-contained PHP CLI binary
         run: |
