@@ -11,10 +11,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias([
-            'training.auth' => \App\Http\Middleware\EnsureTrainingAuth::class,
-        ]);
-    })
+    $middleware->trustProxies(at: '*');
+
+    $middleware->alias([
+        'training.auth' => \App\Http\Middleware\EnsureTrainingAuth::class,
+    ]);
+})
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
