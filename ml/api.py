@@ -152,9 +152,9 @@ def train_endpoint():
 
 
 if __name__ == "__main__":
-    # debug=True's reloader spawns a child process to watch for file changes
-    # — harmless in normal dev use, but a PyInstaller-frozen exe re-launching
-    # itself as its own "child" causes an infinite relaunch loop. Off by
-    # default (safe for the packaged app); set TRIAGE_API_DEBUG=1 for the
-    # dev workflow's auto-reload.
-    app.run(host="127.0.0.1", port=5055, debug=os.environ.get("TRIAGE_API_DEBUG") == "1")
+    port = int(os.environ.get("PORT", 5055))
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=os.environ.get("TRIAGE_API_DEBUG") == "1"
+    )
